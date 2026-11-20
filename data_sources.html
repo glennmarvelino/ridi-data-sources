@@ -1,0 +1,50 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RIDI · Data Sources</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#182c3a;background:#f3f6f8}*{box-sizing:border-box}body{margin:0}header{background:#112d3b;color:white;padding:25px max(24px,calc((100vw - 1100px)/2))}header small{color:#7ed9d0;letter-spacing:2px}h1{font-size:30px;margin:8px 0}header p{color:#c4d3da;margin-bottom:0}main{max-width:1148px;margin:auto;padding:26px 24px}form{display:flex;gap:10px;flex-wrap:wrap}input{flex:1;min-width:220px;padding:14px;border:1px solid #acbec8;border-radius:8px;font:inherit}button{border:0;background:#146e70;color:white;padding:13px 20px;border-radius:8px;font:inherit;cursor:pointer}button.secondary{background:white;color:#18535a;border:1px solid #a8c5c9}button:disabled{opacity:.5;cursor:wait}#status{min-height:24px;color:#46606f}#status.error{color:#b32630}.card{padding:22px;background:white;border:1px solid #d5e0e5;border-radius:12px;margin:15px 0}.meta{font-size:13px;color:#526c7a;overflow-wrap:anywhere}h2{font-size:20px;margin:10px 0}article p{white-space:pre-wrap;line-height:1.6;overflow-wrap:anywhere}a{color:#10676e}details{margin-top:18px}summary{cursor:pointer;color:#526c7a;font-size:14px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6f8;padding:16px;font-size:12px}footer{display:flex;gap:10px;align-items:center;margin-top:24px}#page{color:#526c7a;font-size:14px}
+</style>
+<header><small>RIDI / DATA SOURCES</small><h1>Explore the source collection</h1><p>Browse points from ridi_documents or search by meaning. Read-only access.</p></header>
+<main><form id="search"><input id="query" aria-label="Search sources" placeholder="Ask about smart lighting, renovation, materials…" maxlength="500"><button>Search</button><button type="button" class="secondary" id="browse">Browse points</button></form>
+<p id="status" role="status" aria-live="polite">Loading points…</p><section id="results" aria-label="Qdrant points"></section>
+<footer><button class="secondary" id="back" disabled>Previous</button><span id="page"></span><button id="next" disabled>Next 10 points</button></footer></main>
+<script>
+const $=id=>document.getElementById(id);
+let offsets=[null], current=0, next=null, mode='browse', active;
+function text(tag,value,parent){const el=document.createElement(tag);el.textContent=value;parent.append(el);return el}
+function render(items){
+ $('results').replaceChildren();
+ for(const point of items){
+  const p=point.payload||{}, card=document.createElement('article');card.className='card';
+  text('div','POINT '+point.id+(Number.isFinite(point.score)?' · Similarity '+point.score.toFixed(3):''),card).className='meta';
+  text('h2',p.title||p.source||'Untitled point',card);
+  const source=typeof p.source==='object'?JSON.stringify(p.source):p.source;
+  text('div',[source,p.category,p.language,(p.page??p.pdf_page)!=null?'Page '+(p.page??p.pdf_page):''].filter(Boolean).join(' · '),card).className='meta';
+  text('p',p.text||p.content||p.description||'No text field available. See the full payload below.',card);
+  try{const u=new URL(p.source_url||p.url);if(['https:','http:'].includes(u.protocol)){const a=text('a','Open source ↗',card);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer'}}catch{}
+  const d=document.createElement('details');text('summary','Full payload',d);text('pre',JSON.stringify(p,null,2),d);card.append(d);$('results').append(card);
+ }
+}
+function buttons(busy=false){$('back').disabled=busy||mode!=='browse'||current===0;$('next').disabled=busy||mode!=='browse'||next===null}
+async function load(search=false){
+ active?.abort();const request=active=new AbortController();
+ const q=$('query').value.trim();
+ if(search&&!q){$('status').textContent='Enter a search query.';return}
+ $('status').className='';$('status').textContent=search?'Searching Qdrant…':'Loading points from Qdrant…';$('results').replaceChildren();buttons(true);
+ try{
+ const url=search?'/api/search':'/api/points'+(offsets[current]!==null?'?offset='+encodeURIComponent(JSON.stringify(offsets[current])):'');
+ const r=await fetch(url,{signal:request.signal,...(search?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q})}:{})});
+ const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');
+ if(active!==request)return;
+ next=data.next_offset??null;render(data.items);
+ $('status').textContent=data.items.length?data.items.length+(search?' closest matches. Similarity is not proof of relevance.':' points loaded from Qdrant.'):'No points returned.';
+ $('page').textContent=search?'Search results':'Page '+(current+1);
+ }catch(e){if(active!==request)return;$('status').className='error';$('status').textContent=e.name==='AbortError'?'Request cancelled.':e.message;next=null;$('page').textContent='';}
+ finally{if(active===request)buttons()}
+}
+$('search').onsubmit=e=>{e.preventDefault();mode='search';load(true)};
+$('browse').onclick=()=>{mode='browse';current=0;offsets=[null];next=null;load()};
+$('next').onclick=()=>{offsets=offsets.slice(0,current+1);offsets.push(next);current++;load()};
+$('back').onclick=()=>{current--;load()};
+load();
+</script></html>
