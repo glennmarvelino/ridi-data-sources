@@ -4,6 +4,7 @@ import os
 from getpass import getpass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from dotenv import load_dotenv
 from urllib.parse import urlsplit, parse_qs
 from qdrant_gateway import QdrantGateway, GatewayError
 
@@ -60,6 +61,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(502, {'error': str(e)})
 
 if __name__ == '__main__':
+    load_dotenv(Path(__file__).with_name(".env"))
     endpoint = os.getenv('QDRANT_URL') or input('Qdrant Cluster Endpoint: ')
     key = os.getenv('QDRANT_API_KEY') or getpass('Qdrant read-only API key: ')
     try:
