@@ -1,9 +1,9 @@
 import json
 import os
-from getpass import getpass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 class NoRedirect(HTTPRedirectHandler):
@@ -12,15 +12,12 @@ class NoRedirect(HTTPRedirectHandler):
 
 def search(q):
     req = Request(
-        ENDPOINT + '/collections/ridi_documents/points/query',
-        data=json.dumps({
-            'query': {'text': 'query: ' + q, 'model': 'intfloat/multilingual-e5-small'},
-            'limit': 5, 'with_payload': True, 'with_vector': False,
-        }).encode(),
-        headers={'Content-Type': 'application/json', 'api-key': KEY},
+        DATA_SOURCES_URL + '/api/search',
+        data=json.dumps({'q': q}).encode(),
+        headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
     )
-    with build_opener(NoRedirect()).open(req, timeout=20) as response:
-        points = json.load(response)['result']['points']
+    with build_opener(NoRedirect()).open(req, timeout=25) as response:
+        points = json.load(response).get('items', [])
     items = []
     for point in points:
         p = point.get('payload') or {}
@@ -44,6 +41,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ('/', '/index.html'):
             self.send_data(200, 'text/html; charset=utf-8', Path(__file__).with_name('index.html').read_bytes())
+        elif self.path == '/api/health':
+            self.send_json(200, {'status': 'ok'})
         else:
             self.send_json(404, {'error': 'Not found'})
 
@@ -65,18 +64,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(400, {'error': 'Enter 1–500 characters'})
         try:
             items = search(q.strip())
-        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             self.log_error('Qdrant request failed: %s %s', type(exc).__name__, getattr(exc, 'code', ''))
             return self.send_json(502, {'error': 'Qdrant search unavailable'})
         self.send_json(200, {'items': items})
 
 if __name__ == '__main__':
-    ENDPOINT = (os.environ.get('QDRANT_URL') or input('Qdrant Cluster Endpoint: ')).strip().rstrip('/')
-    parsed = urlsplit(ENDPOINT)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.path or parsed.username or parsed.query or parsed.fragment:
-        raise SystemExit('Use the HTTPS cluster endpoint without a dashboard path.')
-    KEY = (os.environ.get('QDRANT_API_KEY') or getpass('Qdrant read-only API key: ')).strip()
-    if not KEY:
-        raise SystemExit('A read-only API key is required.')
-    print('Open http://127.0.0.1:8000 in your browser.')
-    ThreadingHTTPServer(('127.0.0.1', 8000), Handler).serve_forever()
+    DATA_SOURCES_URL = os.environ.get('DATA_SOURCES_URL', 'http://127.0.0.1:8001').strip().rstrip('/')
+    parsed = urlsplit(DATA_SOURCES_URL)
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        raise SystemExit('DATA_SOURCES_URL must be a valid HTTP or HTTPS URL.')
+    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', '8000'))
+    print(f'MarktRadar listening on http://{host}:{port}; Data Sources: {DATA_SOURCES_URL}')
+    ThreadingHTTPServer((host, port), Handler).serve_forever()

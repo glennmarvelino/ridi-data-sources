@@ -25,6 +25,8 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path)
         if p.path == '/':
             return self.reply(200, Path(__file__).with_name('data_sources.html').read_bytes(), 'text/html; charset=utf-8')
+        if p.path == '/api/health':
+            return self.reply(200, {'status': 'ok'})
         if p.path != '/api/points':
             return self.reply(404, {'error': 'Not found'})
         try:
@@ -62,11 +64,23 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     load_dotenv(Path(__file__).with_name(".env"))
-    endpoint = os.getenv('QDRANT_URL') or input('Qdrant Cluster Endpoint: ')
-    key = os.getenv('QDRANT_API_KEY') or getpass('Qdrant read-only API key: ')
+    endpoint = os.getenv('QDRANT_URL', '').strip()
+    key = os.getenv('QDRANT_API_KEY', '').strip()
+    if not endpoint:
+        try:
+            endpoint = input('Qdrant Cluster Endpoint: ').strip()
+        except EOFError:
+            raise SystemExit('Set QDRANT_URL in dataSources/.env before starting the server.')
+    if not key:
+        try:
+            key = getpass('Qdrant read-only API key: ').strip()
+        except EOFError:
+            raise SystemExit('Set QDRANT_API_KEY in dataSources/.env before starting the server.')
     try:
         Handler.gateway = QdrantGateway(endpoint, key)
     except ValueError as e:
         raise SystemExit(str(e))
-    print('Open http://127.0.0.1:8001 — Ctrl+C to stop')
-    ThreadingHTTPServer(('127.0.0.1', 8001), Handler).serve_forever()
+    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', '8001'))
+    print(f'Data Sources listening on http://{host}:{port} — Ctrl+C to stop')
+    ThreadingHTTPServer((host, port), Handler).serve_forever()

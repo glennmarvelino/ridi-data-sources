@@ -41,6 +41,17 @@ The original main.py, sources.py and retrieval.py are preserved unchanged.
 The Qdrant REST gateway was adapted from the supplied Marktradar server.
 This interface is independent of Marktradar and does not modify the database.
 
+### Docker quick start
+
+Fill `dataSources/.env` with `QDRANT_URL` and `QDRANT_API_KEY`, then run from the repository root:
+
+```powershell
+docker compose up --build
+```
+
+Open http://localhost:8001 for the Data Sources UI. MarktRadar runs on
+http://localhost:8000 and sends searches to Data Sources over the Docker network.
+
 ### Windows quick start
 
 Open PowerShell in this folder:
@@ -70,8 +81,8 @@ Response: {"items": [Qdrant points including score], "next_offset": null}
 
 Only the backend knows the Qdrant credentials. No write endpoints exist.
 QDRANT_URL and QDRANT_API_KEY may alternatively be provided as environment
-variables. .env.example is a template; .env is not automatically loaded.
-Do not commit keys, .env, or database exports.
+variables. `.env.example` is a template; this server automatically loads
+`dataSources/.env`. Do not commit keys, `.env`, or database exports.
 
 ### Scope and validation
 
