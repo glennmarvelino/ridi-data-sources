@@ -6872,16 +6872,18 @@ document.addEventListener('DOMContentLoaded', boot);
     list.replaceChildren();
   }
   input.addEventListener('input', reset);
-  category.addEventListener('change', reset);
+  category.addEventListener('change', () => {
+    if (input.value.trim()) runSearch();
+    else reset();
+  });
   dialog.addEventListener('close', reset);
-  input.addEventListener('keydown', async (event) => {
-    if (event.key !== 'Enter' || event.isComposing) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.repeat) return;
+  async function runSearch(showEmptyMessage = false) {
     reset();
     const q = input.value.trim();
-    if (!q) { status.textContent = de() ? 'Bitte Suchbegriff eingeben.' : 'Enter a search term.'; return; }
+    if (!q) {
+      if (showEmptyMessage) status.textContent = de() ? 'Bitte Suchbegriff eingeben.' : 'Enter a search term.';
+      return;
+    }
     const active = request = new AbortController();
     status.textContent = de() ? 'Suche läuft…' : 'Searching…';
     try {
@@ -6910,6 +6912,13 @@ document.addEventListener('DOMContentLoaded', boot);
     } catch (e) {
       if (request === active) status.textContent = de() ? 'Qdrant nicht erreichbar. Serverkonfiguration prüfen.' : 'Qdrant search unavailable. Check the server configuration.';
     }
+  }
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    runSearch(true);
   });
 })();
 </script>

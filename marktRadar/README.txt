@@ -6,7 +6,9 @@ The recommended setup is Docker Compose from the repository root:
 2. Run: docker compose up --build
 3. Open http://localhost:8000 in your browser.
 4. Press Ctrl+K, enter a research topic, choose one of the seven categories (or
-   search across all categories), and press Enter.
+   search across all categories), and press Enter. Changing the category while a
+   topic is present immediately refreshes the Qdrant query and source results;
+   no Enter key is needed. Typing alone does not trigger a search.
 
 MarktRadar turns the topic into a short, RIDI-focused Qdrant retrieval query.
 The query scopes results to professional lighting in non-residential buildings
