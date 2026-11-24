@@ -1423,7 +1423,7 @@ pre.code { margin: 0; max-height: 18rem; overflow: auto; padding: 1rem; border-r
 
 /* --- Search dialog: borderless input, quiet results --- */
 dialog.search {
-  width: min(40rem, calc(100vw - 2rem)); max-height: min(36rem, calc(100dvh - 4rem)); margin: 10vh auto auto; padding: 0; overflow: hidden;
+  width: min(40rem, calc(100vw - 2rem)); max-height: min(36rem, calc(100dvh - 4rem)); margin: 10vh auto auto; padding: 0; overflow: auto;
   border: 0; border-radius: var(--radius-xl); background: var(--color-surface-raised); color: var(--color-text);
   box-shadow: var(--shadow-pop);
 }
@@ -6814,13 +6814,52 @@ document.addEventListener('DOMContentLoaded', boot);
   const input = document.getElementById('search-input');
   const panel = document.createElement('section');
   panel.style.padding = '0.75rem';
+  const categoryLabel = document.createElement('label');
+  categoryLabel.style.display = 'grid';
+  categoryLabel.style.gap = '0.25rem';
+  categoryLabel.style.marginBottom = '0.5rem';
+  const categoryName = document.createElement('span');
+  const category = document.createElement('select');
+  category.className = 'input';
+  category.setAttribute('aria-label', '');
+  const prompt = document.createElement('details');
+  prompt.hidden = true;
+  prompt.style.margin = '0.5rem 0';
+  const promptSummary = document.createElement('summary');
+  const promptText = document.createElement('p');
+  promptText.style.margin = '0.25rem 0';
+  prompt.append(promptSummary, promptText);
+  categoryLabel.append(categoryName, category);
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   const list = document.createElement('ul');
-  panel.append(status, list);
+  panel.append(categoryLabel, prompt, status, list);
   dialog.append(panel);
   const de = () => document.documentElement.lang === 'de';
-  const label = () => input.title = de() ? 'Enter: Qdrant durchsuchen' : 'Enter: Search Qdrant';
+  const categories = [
+    ['all', 'Alle sieben Kategorien', 'All seven categories'],
+    ['customer-needs', 'Kundenbedarf', 'Customer needs'],
+    ['renovation-demand', 'Renovierung und Marktnachfrage', 'Renovation and market demand'],
+    ['technology', 'Technologie', 'Technology'],
+    ['regulation', 'Regulierung und Produktanforderungen', 'Regulation and product requirements'],
+    ['labour', 'Arbeitsbezogene Kundenbedürfnisse', 'Labour-related customer needs'],
+    ['research-adjacent', 'Forschung und angrenzende Branchen', 'Research and adjacent industries'],
+    ['market-trade', 'Marktstruktur und Handel', 'Market structure and trade'],
+  ];
+  const label = () => {
+    const selected = category.value || 'all';
+    input.title = de() ? 'Enter: Qdrant durchsuchen' : 'Enter: Search Qdrant';
+    categoryName.textContent = de() ? 'Marktforschungs-Kategorie' : 'Market research category';
+    category.replaceChildren(...categories.map(([value, german, english]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = de() ? german : english;
+      return option;
+    }));
+    category.value = selected;
+    category.setAttribute('aria-label', categoryName.textContent);
+    promptSummary.textContent = de() ? 'Generierter Qdrant-Prompt' : 'Generated Qdrant query';
+  };
   label();
   new MutationObserver(label).observe(document.documentElement, {attributes:true, attributeFilter:['lang']});
   let request;
@@ -6828,9 +6867,12 @@ document.addEventListener('DOMContentLoaded', boot);
     request?.abort();
     request = null;
     status.textContent = '';
+    prompt.hidden = true;
+    promptText.textContent = '';
     list.replaceChildren();
   }
   input.addEventListener('input', reset);
+  category.addEventListener('change', reset);
   dialog.addEventListener('close', reset);
   input.addEventListener('keydown', async (event) => {
     if (event.key !== 'Enter' || event.isComposing) return;
@@ -6845,12 +6887,14 @@ document.addEventListener('DOMContentLoaded', boot);
     try {
       const response = await fetch('/api/qdrant/search', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({q}), signal:active.signal
+        body:JSON.stringify({q, category:category.value}), signal:active.signal
       });
       if (!response.ok) throw new Error(String(response.status));
-      const {items} = await response.json();
+      const {items, query} = await response.json();
       if (request !== active) return;
       status.textContent = items.length ? (de() ? 'Qdrant · Quellen' : 'Qdrant · Sources') : (de() ? 'Keine Ergebnisse.' : 'No results.');
+      promptText.textContent = query;
+      prompt.hidden = !query;
       for (const item of items) {
         const li = document.createElement('li');
         let url;

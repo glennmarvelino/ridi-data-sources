@@ -6,6 +6,63 @@ from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
+SEARCH_PROMPTS = {
+    'all': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find evidence across '
+        'customer needs, renovation/market demand, technology, regulation, labour, '
+        'research/adjacent industries, and market structure/trade.'
+    ),
+    'customer-needs': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find customer, planner, '
+        'operator and user needs, procurement criteria, and buying requirements.'
+    ),
+    'renovation-demand': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find renovation and '
+        'retrofit demand, building segments, investment, financing, energy costs, and market signals.'
+    ),
+    'technology': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find lighting technology, '
+        'controls, sensors, components, interoperability, performance, and commercial readiness.'
+    ),
+    'regulation': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find relevant laws, '
+        'standards, procurement rules, deadlines, and product requirements; separate mandatory from voluntary.'
+    ),
+    'labour': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find workforce constraints '
+        'affecting installation, commissioning, maintenance, and customer operations.'
+    ),
+    'research-adjacent': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find research evidence and '
+        'transferable findings from adjacent industries, including practical applicability.'
+    ),
+    'market-trade': (
+        'RIDI professional lighting for non-residential buildings: {topic}. Find market structure, '
+        'distribution, trade, contractors, supply chains, and financial conditions.'
+    ),
+}
+SEARCH_GUIDANCE = (
+    ' Prioritize direct RIDI application fit, observable change, authoritative accessible and '
+    'actionable evidence; prefer higher-ranked category entries; exclude competitor-only monitoring.'
+)
+
+
+def build_search_prompt(question, category='all'):
+    """Turn a user's topic into a concise, RIDI-focused Qdrant retrieval query."""
+    if category not in SEARCH_PROMPTS:
+        raise ValueError('Unknown research category.')
+    topic = ' '.join(question.split())
+    if not topic:
+        raise ValueError('A research topic is required.')
+    template = SEARCH_PROMPTS[category] + SEARCH_GUIDANCE
+    topic_limit = 500 - len(template.format(topic=''))
+    if topic_limit < 1:
+        raise ValueError('Research prompt is too long.')
+    if len(topic) > topic_limit:
+        topic = topic[:topic_limit].rsplit(' ', 1)[0].strip() or topic[:topic_limit]
+    return template.format(topic=topic)
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -57,17 +114,22 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get('Content-Length', '0'))
             if not 0 < n <= 8192:
                 raise ValueError
-            q = json.loads(self.rfile.read(n)).get('q')
+            body = json.loads(self.rfile.read(n))
+            q = body.get('q')
+            category = body.get('category', 'all')
             if not isinstance(q, str) or not 1 <= len(q.strip()) <= 500:
                 raise ValueError
+            if not isinstance(category, str):
+                raise ValueError
+            query = build_search_prompt(q.strip(), category)
         except (ValueError, AttributeError):
-            return self.send_json(400, {'error': 'Enter 1–500 characters'})
+            return self.send_json(400, {'error': 'Enter 1–500 characters and choose a valid research category'})
         try:
-            items = search(q.strip())
+            items = search(query)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             self.log_error('Qdrant request failed: %s %s', type(exc).__name__, getattr(exc, 'code', ''))
             return self.send_json(502, {'error': 'Qdrant search unavailable'})
-        self.send_json(200, {'items': items})
+        self.send_json(200, {'items': items, 'query': query})
 
 if __name__ == '__main__':
     DATA_SOURCES_URL = os.environ.get('DATA_SOURCES_URL', 'http://127.0.0.1:8001').strip().rstrip('/')
