@@ -149,7 +149,13 @@ def browse_domain_sources(domain_id, offset=0, query=''):
         raise ValueError('Unknown category.')
     if type(offset) is not int or offset < 0:
         raise ValueError('Invalid page offset.')
-    source_ids = [entry['id'] for entry in DOMAIN_SOURCE_ASSIGNMENTS[domain_id]]
+    entries = DOMAIN_SOURCE_ASSIGNMENTS[domain_id]
+    placements = {
+        entry['id']: entry.get('placement', 'main')
+        for entry in entries
+    }
+    source_ids = [entry['id'] for entry in entries]
+    source_ids.sort(key=lambda source_id: placements[source_id] == 'supporting')
     query = ' '.join(query.split())
     if query:
         points = []
@@ -168,9 +174,9 @@ def browse_domain_sources(domain_id, offset=0, query=''):
             )).casefold()
             score = sum(text.count(token) for token in tokens)
             if tokens and all(token in text for token in tokens):
-                matches.append((score, index, point))
-        matches.sort(key=lambda hit: (-hit[0], hit[1]))
-        ordered_points = [point for _, _, point in matches]
+                matches.append((placements[source_id] == 'supporting', score, index, point))
+        matches.sort(key=lambda hit: (hit[0], -hit[1], hit[2]))
+        ordered_points = [point for _, _, _, point in matches]
     else:
         page_ids = source_ids[offset:offset + DOMAIN_SOURCE_PAGE_SIZE]
         if not page_ids:
@@ -199,6 +205,7 @@ def browse_domain_sources(domain_id, offset=0, query=''):
             'url': str(payload.get('source_url') or payload.get('url') or ''),
             'text': str(payload.get('text') or payload.get('content') or payload.get('description') or '')[:360],
             'assignment_reason': reasons[source_id],
+            'placement': placements[source_id],
         })
     next_offset = offset + len(page)
     if next_offset >= total:

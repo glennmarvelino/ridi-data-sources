@@ -103,7 +103,12 @@ class TestSearchEndpoint(unittest.TestCase):
 
     def test_domain_search_endpoint_returns_confirmed_sources_and_count(self):
         page = {
-            'items': [{'id': 2, 'title': 'D4i', 'assignment_reason': 'Sensors and networks.'}],
+            'items': [{
+                'id': 2,
+                'title': 'D4i',
+                'assignment_reason': 'Sensors and networks.',
+                'placement': 'supporting',
+            }],
             'next_offset': 10,
             'total': 11,
             'domain_id': 'T2',
@@ -195,6 +200,12 @@ class TestDomainSourceAssignments(unittest.TestCase):
             ids = [entry['id'] for entry in entries]
             self.assertEqual(len(ids), len(set(ids)))
             self.assertTrue(all(entry['reason'].strip() for entry in entries))
+            self.assertTrue(all(
+                entry.get('placement', 'main') in ('main', 'supporting')
+                for entry in entries
+            ))
+            placements = [entry.get('placement', 'main') for entry in entries]
+            self.assertEqual(placements, sorted(placements, key=lambda value: value == 'supporting'))
 
     def test_confirmed_and_pending_ranges_cover_the_catalogue_snapshot(self):
         confirmed = {
@@ -214,19 +225,44 @@ class TestDomainSourceAssignments(unittest.TestCase):
         self.assertEqual({int(source_id) for source_id, status in statuses.items() if status != 'assigned'}, unresolved)
         self.assertEqual(confirmed | unresolved, {int(source_id) for source_id in catalogue_ids})
         self.assertEqual(SOURCE_REVIEW_PENDING_COUNT, sum(status in ('unchecked', 'needs_team_decision') for status in statuses.values()))
-        self.assertEqual(sum(status == 'out_of_scope' for status in statuses.values()), 88)
-        self.assertEqual(sum(status == 'needs_team_decision' for status in statuses.values()), 375)
+        self.assertEqual(sum(status == 'out_of_scope' for status in statuses.values()), 99)
+        self.assertEqual(sum(status == 'needs_team_decision' for status in statuses.values()), 0)
         self.assertEqual(sum(status == 'unchecked' for status in statuses.values()), 0)
-        self.assertEqual(len(confirmed), 972)
-        self.assertEqual(sum(len(entries) for entries in DOMAIN_SOURCE_ASSIGNMENTS.values()), 1128)
+        self.assertEqual(len(confirmed), 1336)
+        self.assertEqual(sum(len(entries) for entries in DOMAIN_SOURCE_ASSIGNMENTS.values()), 1567)
         pending_reasons = SOURCE_ASSIGNMENT_DATA['pending_reasons']
-        self.assertEqual(set(pending_reasons), {str(source_id) for source_id in unresolved})
+        awaiting_decision = {
+            source_id
+            for source_id, status in statuses.items()
+            if status in ('unchecked', 'needs_team_decision')
+        }
+        self.assertEqual(set(pending_reasons), awaiting_decision)
         self.assertTrue(all(reason.strip() for reason in pending_reasons.values()))
         for entry in SOURCE_ASSIGNMENT_DATA['reviewed_pending']:
             self.assertIn(entry['id'], unresolved)
             self.assertIn(entry['status'], ('out_of_scope', 'needs_team_decision'))
-            self.assertEqual(pending_reasons[str(entry['id'])], entry['reason'])
+            self.assertEqual(statuses[str(entry['id'])], entry['status'])
+            self.assertTrue(entry['reason'].strip())
+            if entry['status'] == 'needs_team_decision':
+                self.assertEqual(pending_reasons[str(entry['id'])], entry['reason'])
         self.assertIn([1, 1435], SOURCE_ASSIGNMENT_DATA['reviewed_id_ranges'])
+        self.assertEqual(SOURCE_REVIEW_PENDING_COUNT, 0)
+
+        main_ids = {
+            entry['id']
+            for entries in DOMAIN_SOURCE_ASSIGNMENTS.values()
+            for entry in entries
+            if entry.get('placement', 'main') == 'main'
+        }
+        supporting_ids = {
+            entry['id']
+            for entries in DOMAIN_SOURCE_ASSIGNMENTS.values()
+            for entry in entries
+            if entry.get('placement') == 'supporting'
+        }
+        self.assertEqual(len(main_ids), 972)
+        self.assertEqual(len(supporting_ids), 364)
+        self.assertFalse(main_ids & supporting_ids)
 
     def test_adjacent_industries_sweep_records_uc_q12_review_without_false_assignments(self):
         sweeps = SOURCE_ASSIGNMENT_DATA['reviewed_category_sweeps']
@@ -269,6 +305,10 @@ class TestDomainSourceAssignments(unittest.TestCase):
         self.assertEqual([item['id'] for item in page['items']], ids[:10])
         self.assertEqual(page['total'], len(ids))
         self.assertEqual(page['next_offset'], 10)
+        self.assertEqual(
+            [item['placement'] for item in page['items']],
+            [entry.get('placement', 'main') for entry in DOMAIN_SOURCE_ASSIGNMENTS['T2'][:10]],
+        )
 
     def test_final_empty_query_page_returns_last_assignment_without_repeating_offset(self):
         ids = [entry['id'] for entry in DOMAIN_SOURCE_ASSIGNMENTS['T2']]
@@ -284,6 +324,51 @@ class TestDomainSourceAssignments(unittest.TestCase):
         self.assertEqual(page['total'], len(ids))
         self.assertIsNone(page['next_offset'])
 
+    def test_all_empty_query_pages_match_assignment_order_without_duplicates(self):
+        ids = [entry['id'] for entry in DOMAIN_SOURCE_ASSIGNMENTS['T2']]
+
+        def retrieve(page_ids):
+            return [
+                {'id': source_id, 'payload': {'title': str(source_id)}}
+                for source_id in page_ids
+            ]
+
+        gathered = []
+        offset = 0
+        with patch('server.retrieve_sources', side_effect=retrieve):
+            while True:
+                page = browse_domain_sources('T2', offset)
+                gathered.extend(item['id'] for item in page['items'])
+                if page['next_offset'] is None:
+                    break
+                offset = page['next_offset']
+
+        self.assertEqual(gathered, ids)
+        self.assertEqual(len(gathered), len(set(gathered)))
+
+    def test_text_results_keep_supporting_sources_after_main_sources(self):
+        entries = DOMAIN_SOURCE_ASSIGNMENTS['T2']
+        main_ids = [entry['id'] for entry in entries if entry.get('placement', 'main') == 'main']
+        supporting_ids = [entry['id'] for entry in entries if entry.get('placement') == 'supporting']
+        points = [
+            {'id': entry['id'], 'payload': {'title': 'connected lighting'}}
+            for entry in entries
+        ]
+        with patch('server.retrieve_sources', return_value=points):
+            main_page = browse_domain_sources('T2', 0, 'connected lighting')
+            supporting_page = browse_domain_sources('T2', len(main_ids), 'connected lighting')
+
+        self.assertEqual(
+            [item['id'] for item in main_page['items']],
+            main_ids[:10],
+        )
+        self.assertEqual(
+            [item['id'] for item in supporting_page['items']],
+            supporting_ids[:10],
+        )
+        self.assertTrue(all(item['placement'] == 'supporting' for item in supporting_page['items']))
+        self.assertEqual(main_page['total'], len(entries))
+
     def test_text_filter_searches_only_assigned_records_and_pages_results(self):
         ids = [entry['id'] for entry in DOMAIN_SOURCE_ASSIGNMENTS['T2']]
         points = [
@@ -294,8 +379,11 @@ class TestDomainSourceAssignments(unittest.TestCase):
             {'id': source_id, 'payload': {'title': 'Unrelated', 'text': 'No matching text'}}
             for source_id in ids[6:]
         )
-        point_batches = [points[:100], points[100:]]
-        with patch('server.retrieve_sources', side_effect=point_batches) as retrieve:
+        def retrieve_page(page_ids):
+            page_id_set = set(page_ids)
+            return [point for point in points if point['id'] in page_id_set]
+
+        with patch('server.retrieve_sources', side_effect=retrieve_page) as retrieve:
             page = browse_domain_sources('T2', 0, 'Bluetooth sensor')
 
         retrieved_ids = [source_id for call in retrieve.call_args_list for source_id in call.args[0]]

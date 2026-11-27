@@ -1439,6 +1439,8 @@ dialog.search.category-browse[open] { display: flex; flex-direction: column; wid
 .category-browse-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0.5rem 1.25rem 1.25rem; }
 .category-browse-status { margin: 0.75rem 0; color: var(--color-text-muted); font-size: var(--text-sm); }
 .category-source-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.category-source-section { padding: 0.875rem 0 0.25rem; }
+.category-source-section h3 { margin: 0; color: var(--color-text-subtle); font-size: var(--text-xs); font-weight: 600; }
 .category-source { min-width: 0; padding: 0.875rem 0; border-bottom: 1px solid var(--color-hairline); }
 .category-source-title { display: block; overflow-wrap: anywhere; color: var(--color-text); font-size: var(--text-sm); font-weight: 600; line-height: 1.45; }
 a.category-source-title { color: var(--color-text-link); text-decoration: none; }
@@ -6932,6 +6934,9 @@ document.addEventListener('DOMContentLoaded', boot);
     browseMore.textContent = de() ? 'Weitere Quellen laden' : 'Load more sources';
     browseRetry.textContent = de() ? 'Erneut versuchen' : 'Retry';
     searchMore.textContent = de() ? 'Weitere Quellen laden' : 'Load more sources';
+    document.querySelectorAll('.category-source-section h3').forEach((heading) => {
+      heading.textContent = de() ? 'Ergänzende Quellen' : 'Supporting sources';
+    });
   };
   const browseCategoriesFor = (categoryId) => {
     if (categoryId === 'technik') return ['Technology'];
@@ -6955,6 +6960,14 @@ document.addEventListener('DOMContentLoaded', boot);
     const publisher = item.publisher || item.source || '';
     const titleText = item.title || publisher;
     if (!titleText) return;
+    if (item.placement === 'supporting' && !target.querySelector('.category-source-section')) {
+      const section = document.createElement('li');
+      section.className = 'category-source-section';
+      const heading = document.createElement('h3');
+      heading.textContent = de() ? 'Ergänzende Quellen' : 'Supporting sources';
+      section.append(heading);
+      target.append(section);
+    }
     let url;
     try {
       const parsed = new URL(item.url);
@@ -6981,6 +6994,15 @@ document.addEventListener('DOMContentLoaded', boot);
     }
     target.append(row);
   }
+  const sourceCount = (target) => target.querySelectorAll('.category-source').length;
+  const reviewPendingSuffix = (count) => count > 0
+    ? (de()
+      ? ` · ${count} Katalogeinträge noch in Prüfung`
+      : ` · ${count} catalogue records pending review`)
+    : '';
+  const emptyCategoryMessage = (count) => de()
+    ? `Für diese Kategorie sind derzeit keine Quellen verfügbar.${count > 0 ? ` ${count} Katalogeinträge sind noch in Prüfung.` : ''}`
+    : `No sources are currently available for this category.${count > 0 ? ` ${count} catalogue records are still under review.` : ''}`;
   async function searchDomain(domainId, text, signal, offset = 0) {
     const response = await fetch('/api/qdrant/search', {
       method: 'POST',
@@ -7025,13 +7047,11 @@ document.addEventListener('DOMContentLoaded', boot);
             || result.domain_id !== browseCategoryId) throw new Error('Invalid domain-source response');
         browseStatus.textContent = result.total
           ? (de()
-            ? `${result.total} bestätigte Quellen · ${browseList.children.length} angezeigt · ${result.review_pending_count} Katalogeinträge noch in Prüfung`
-            : `${result.total} confirmed sources · ${browseList.children.length} shown · ${result.review_pending_count} catalogue records pending review`)
-          : (de()
-            ? `Für diese Kategorie sind derzeit keine Quellen verfügbar. ${result.review_pending_count} Katalogeinträge sind noch in Prüfung.`
-            : `No sources are currently available for this category. ${result.review_pending_count} catalogue records are still under review.`);
+            ? `${result.total} bestätigte Quellen · ${sourceCount(browseList)} angezeigt${reviewPendingSuffix(result.review_pending_count)}`
+            : `${result.total} confirmed sources · ${sourceCount(browseList)} shown${reviewPendingSuffix(result.review_pending_count)}`)
+          : emptyCategoryMessage(result.review_pending_count);
       } else {
-        browseStatus.textContent = browseList.children.length
+        browseStatus.textContent = sourceCount(browseList)
           ? '' : (de() ? 'Keine passenden Quellen gefunden.' : 'No relevant sources found.');
       }
       browseMore.hidden = browseOffset == null;
@@ -7090,7 +7110,7 @@ document.addEventListener('DOMContentLoaded', boot);
   browseRetry.addEventListener('click', () => {
     if (browseLoading) return;
     browseRetry.disabled = true;
-    loadBrowsePage(browseGeneration, browseList.children.length ? browseOffset : null);
+    loadBrowsePage(browseGeneration, sourceCount(browseList) ? browseOffset : null);
   });
   const label = () => {
     const selected = category.value;
@@ -7151,15 +7171,15 @@ document.addEventListener('DOMContentLoaded', boot);
       }
       result.items.forEach((item) => appendSource(item, list));
       searchOffset = result.next_offset ?? null;
-      const shown = list.children.length;
+      const shown = sourceCount(list);
       status.textContent = result.total
         ? (de()
-          ? `${result.total} bestätigte Quellen · ${shown} angezeigt · ${result.review_pending_count} Katalogeinträge noch in Prüfung`
-          : `${result.total} confirmed sources · ${shown} shown · ${result.review_pending_count} catalogue records pending review`)
-        : (q ? (de() ? 'Keine passenden Quellen in dieser Kategorie.' : 'No matching sources in this category.')
-          : (de()
-          ? `Für diese Kategorie sind derzeit keine Quellen verfügbar. ${result.review_pending_count} Katalogeinträge sind noch in Prüfung.`
-          : `No sources are currently available for this category. ${result.review_pending_count} catalogue records are still under review.`));
+          ? `${result.total} bestätigte Quellen · ${shown} angezeigt${reviewPendingSuffix(result.review_pending_count)}`
+          : `${result.total} confirmed sources · ${shown} shown${reviewPendingSuffix(result.review_pending_count)}`)
+        : (q
+          ? (de() ? 'Keine passenden Quellen in dieser Kategorie.' : 'No matching sources in this category.')
+            + reviewPendingSuffix(result.review_pending_count)
+          : emptyCategoryMessage(result.review_pending_count));
       prompt.hidden = true;
       searchMore.hidden = searchOffset == null;
     } catch (e) {
