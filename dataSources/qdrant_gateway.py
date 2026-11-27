@@ -36,10 +36,17 @@ class QdrantGateway:
         except (ValueError, KeyError, TypeError):
             raise GatewayError('Unexpected response from Qdrant.') from None
 
-    def browse(self, offset=None):
+    def browse(self, offset=None, categories=None):
         body = {'limit': 10, 'with_payload': True, 'with_vector': False}
         if offset is not None:
             body['offset'] = offset
+        if categories:
+            body['filter'] = {
+                'should': [
+                    {'key': 'category', 'match': {'value': category}}
+                    for category in categories
+                ]
+            }
         result = self.request('/scroll', body)
         return {'items': result['points'], 'next_offset': result.get('next_page_offset')}
 

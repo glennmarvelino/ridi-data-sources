@@ -8,6 +8,16 @@ from dotenv import load_dotenv
 from urllib.parse import urlsplit, parse_qs
 from qdrant_gateway import QdrantGateway, GatewayError
 
+QDRANT_CATEGORIES = {
+    'Customer needs',
+    'Renovation and market demand',
+    'Technology',
+    'Future regulation/product requirements',
+    'Market structure and trade',
+    'Labour-related customer needs',
+    'Research and adjacent industries',
+}
+
 class Handler(BaseHTTPRequestHandler):
     gateway = None
 
@@ -27,17 +37,26 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, Path(__file__).with_name('data_sources.html').read_bytes(), 'text/html; charset=utf-8')
         if p.path == '/api/health':
             return self.reply(200, {'status': 'ok'})
-        if p.path != '/api/points':
+        if p.path not in ('/api/points', '/api/category-sources'):
             return self.reply(404, {'error': 'Not found'})
         try:
-            raw = parse_qs(p.query).get('offset', [None])[0]
+            params = parse_qs(p.query)
+            raw = params.get('offset', [None])[0]
             offset = json.loads(raw) if raw is not None else None
             if offset is not None and (type(offset) not in (int, str) or len(str(offset)) > 100 or (type(offset) is int and offset < 0)):
                 raise ValueError
+            categories = None
+            if p.path == '/api/category-sources':
+                raw_categories = params.get('categories', [None])[0]
+                categories = json.loads(raw_categories) if raw_categories is not None else None
+                if (not isinstance(categories, list) or not categories or len(categories) > 7
+                        or any(not isinstance(category, str) or category not in QDRANT_CATEGORIES for category in categories)
+                        or len(set(categories)) != len(categories)):
+                    raise ValueError
         except ValueError:
-            return self.reply(400, {'error': 'Invalid page offset'})
+            return self.reply(400, {'error': 'Invalid category or page offset'})
         try:
-            self.reply(200, self.gateway.browse(offset))
+            self.reply(200, self.gateway.browse(offset, categories))
         except GatewayError as e:
             self.reply(502, {'error': str(e)})
 

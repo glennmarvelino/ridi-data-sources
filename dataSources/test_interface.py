@@ -4,6 +4,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from interface_server import Handler
 from qdrant_gateway import QdrantGateway
 
@@ -54,6 +55,29 @@ class TestInterface(unittest.TestCase):
         self.assertEqual(data, {'offset': 11, 'limit': 10, 'with_payload': True, 'with_vector': False})
         self.assertEqual(key, 'TEST_ONLY')
         self.assertNotIn(b'TEST_ONLY', body)
+    def test_category_browse_uses_exact_category_filter_on_every_page(self):
+        query = urlencode({
+            'categories': json.dumps(['Technology']),
+            'offset': json.dumps(11),
+        })
+        status, _ = self.request('/api/category-sources?' + query)
+        self.assertEqual(status, 200)
+        path, data, _ = Upstream.seen[-1]
+        self.assertTrue(path.endswith('/scroll'))
+        self.assertEqual(data, {
+            'offset': 11,
+            'limit': 10,
+            'with_payload': True,
+            'with_vector': False,
+            'filter': {'should': [
+                {'key': 'category', 'match': {'value': 'Technology'}},
+            ]},
+        })
+    def test_category_browse_rejects_unknown_categories_without_querying_qdrant(self):
+        query = urlencode({'categories': json.dumps(['not-a-category'])})
+        before = len(Upstream.seen)
+        self.assertEqual(self.request('/api/category-sources?' + query)[0], 400)
+        self.assertEqual(len(Upstream.seen), before)
     def test_query_contract(self):
         status, body = self.request('/api/search', {'q':'smart lighting'})
         self.assertEqual(status, 200)

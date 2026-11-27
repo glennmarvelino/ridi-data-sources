@@ -822,7 +822,10 @@ button.task-title[aria-expanded="true"] .icon { transform: rotate(90deg); }
 .radar .group-text {
   font-family: var(--font-display); font-size: calc(12px * var(--rd-k)); font-weight: 600; letter-spacing: 0.16em;
   fill: var(--color-text-subtle); paint-order: stroke; stroke: var(--stage, var(--color-bg)); stroke-width: calc(6px * var(--rd-k)); stroke-linejoin: round;
+  cursor: pointer; pointer-events: all;
 }
+.radar .seg:focus-visible { stroke: var(--color-accent); stroke-width: calc(3px * var(--rd-k)); }
+.radar .group-text:focus-visible { fill: var(--color-text); }
 .radar .hub { fill: var(--stage, var(--color-bg)); }
 .radar .hub-dot { fill: var(--color-accent); }
 
@@ -1429,6 +1432,21 @@ dialog.search {
 }
 dialog.search[open] { animation: pop-in var(--duration-normal) var(--ease-out); }
 dialog.search::backdrop { background: var(--color-overlay); }
+dialog.search.category-browse[open] { display: flex; flex-direction: column; width: min(42rem, calc(100vw - 1.5rem)); max-height: min(44rem, calc(100dvh - 1.5rem)); margin: auto; overflow: hidden; }
+.category-browse-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem 0.75rem; border-bottom: 1px solid var(--color-hairline); background: var(--color-surface-raised); }
+.category-browse-head h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; font: 600 var(--text-lg)/1.3 var(--font-display); }
+.category-browse-kicker { margin: 0.25rem 0 0; color: var(--color-text-subtle); font-size: var(--text-xs); }
+.category-browse-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0.5rem 1.25rem 1.25rem; }
+.category-browse-status { margin: 0.75rem 0; color: var(--color-text-muted); font-size: var(--text-sm); }
+.category-source-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.category-source { min-width: 0; padding: 0.875rem 0; border-bottom: 1px solid var(--color-hairline); }
+.category-source-title { display: block; overflow-wrap: anywhere; color: var(--color-text); font-size: var(--text-sm); font-weight: 600; line-height: 1.45; }
+a.category-source-title { color: var(--color-text-link); text-decoration: none; }
+a.category-source-title:hover { text-decoration: underline; }
+.category-source-publisher { margin: 0.375rem 0 0; color: var(--color-text-subtle); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.category-source-excerpt { margin: 0.5rem 0 0; color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.category-browse-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; padding-top: 1rem; }
+@media (max-width: 40rem) { dialog.search.category-browse[open] { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); } .category-browse-head { padding: 0.875rem 1rem 0.75rem; } .category-browse-scroll { padding: 0.375rem 1rem 1rem; } }
 .search-head { padding: 0.5rem 0.75rem 0; }
 .search-head .input, .search-head .input:hover { border: 0; font-size: var(--text-lg); min-height: 3rem; background: transparent; }
 .search-head .input:focus-visible { outline: none; }
@@ -1782,6 +1800,24 @@ details.more[open] > :not(summary) { animation: swap-in var(--duration-normal) v
     <input class="input" id="search-input" type="search" placeholder="Entwicklung, Produktfamilie, Quelle …" data-i18n-placeholder="shell.searchPlaceholder" autocomplete="off" aria-controls="search-results">
   </div>
   <div class="search-results" id="search-results" role="listbox" aria-label="Treffer" data-i18n-aria="shell.searchHits"></div>
+</dialog>
+
+<dialog class="search category-browse" id="category-browse" aria-labelledby="category-browse-title">
+  <header class="category-browse-head">
+    <div>
+      <h2 id="category-browse-title" tabindex="-1"></h2>
+      <p class="category-browse-kicker">Qdrant · Sources</p>
+    </div>
+    <button class="btn btn--icon" id="category-browse-close" type="button" aria-label="Schließen" title="Schließen">×</button>
+  </header>
+  <div class="category-browse-scroll">
+    <p class="category-browse-status" id="category-browse-status" role="status" aria-live="polite"></p>
+    <ul class="category-source-list" id="category-source-list"></ul>
+    <div class="category-browse-actions">
+      <button class="btn btn--sm" id="category-browse-more" type="button" hidden></button>
+      <button class="btn btn--sm" id="category-browse-retry" type="button" hidden></button>
+    </div>
+  </div>
 </dialog>
 
 <div class="tip" id="tip" role="tooltip"></div>
@@ -2729,8 +2765,8 @@ I18N.add('rd', {
       none: 'keine sichtbar',
     },
     seg: {
-      title: '{full}. Klick filtert auf diese Domäne.',
-      aria: '{domain}, {count}. Filtert auf diese Domäne.',
+      title: '{full}. Klick öffnet Quellen dieser Kategorie.',
+      aria: '{domain}, {count}. Öffnet Quellen dieser Kategorie.',
       unsearched: 'nicht gesucht',
     },
     dot: {
@@ -2762,8 +2798,8 @@ I18N.add('rd', {
       none: 'none visible',
     },
     seg: {
-      title: '{full}. Click to filter by this domain.',
-      aria: '{domain}, {count}. Filters by this domain.',
+      title: '{full}. Click to browse sources in this category.',
+      aria: '{domain}, {count}. Browse sources in this category.',
       unsearched: 'not searched',
     },
     dot: {
@@ -4587,8 +4623,9 @@ class Radar {
       const [a0, a1] = A.of(i);
       const unsearched = coverage[id]?.searched === false;
       const fill = unsearched ? 'url(#rd-hatch)' : i % 2 ? 'var(--radar-seg-b)' : 'var(--radar-seg-a)';
-      s += `<path class="seg${unsearched ? ' is-unsearched' : ''}" data-dom="${id}" data-hot-domain="${id}" d="${arc(34, 286, a0, a1)}" fill="${fill}"/>`;
-      s += `<path class="seg seg--outer" data-dom="${id}" data-hot-domain="${id}" d="${arc(294, 330, a0, a1)}" fill="transparent"/>`;
+      const browseLabel = `${domainText(id)} · ${t('rd.seg.title', { full: DOMAIN[id].full })}`;
+      s += `<path class="seg${unsearched ? ' is-unsearched' : ''}" data-dom="${id}" data-hot-domain="${id}" tabindex="0" role="button" aria-haspopup="dialog" aria-label="${esc(browseLabel)}" d="${arc(34, 286, a0, a1)}" fill="${fill}"/>`;
+      s += `<path class="seg seg--outer" data-dom="${id}" data-hot-domain="${id}" tabindex="0" role="button" aria-haspopup="dialog" aria-label="${esc(browseLabel)}" d="${arc(294, 330, a0, a1)}" fill="transparent"/>`;
       if (selected === id) s += `<path class="rd-selected" d="${arc(34, 330, a0, a1)}"/>`;
     });
     // The inner band carries the decision: a quiet red wash and a stronger edge.
@@ -4620,7 +4657,8 @@ class Radar {
       const [gx0, gy0] = P(RG.rim, center - 0.5); const [gx1, gy1] = P(RG.rim, center + 0.5);
       const lower = Math.sin(center) > 0.05;
       const d = lower ? `M${f(gx1)} ${f(gy1)}A${RG.rim} ${RG.rim} 0 0 0 ${f(gx0)} ${f(gy0)}` : `M${f(gx0)} ${f(gy0)}A${RG.rim} ${RG.rim} 0 0 1 ${f(gx1)} ${f(gy1)}`;
-      s += `<path id="rd-grp-${k}" d="${d}" fill="none"/><text class="group-text" dominant-baseline="central"><textPath href="#rd-grp-${k}" startOffset="50%" text-anchor="middle">${esc(GROUPS[g.g].toUpperCase())}</textPath></text>`;
+      const groupLabel = t(`model.group.${g.g}`);
+      s += `<path id="rd-grp-${k}" d="${d}" fill="none"/><text class="group-text" data-browse-group="${g.g}" role="button" tabindex="0" aria-haspopup="dialog" aria-label="${esc(groupLabel)}" dominant-baseline="central"><textPath href="#rd-grp-${k}" startOffset="50%" text-anchor="middle">${esc(groupLabel.toUpperCase())}</textPath></text>`;
     });
     s += `<circle class="hub" r="${RG.hub}"/><circle class="hub-dot" r="4"/>`;
     this.gStatic.innerHTML = s;
@@ -4636,7 +4674,7 @@ class Radar {
       const align = ax > 0.35 ? 'left' : ax < -0.35 ? 'right' : 'center';
       const side = ay < -0.35 ? 'top' : 'bottom'; // the per-ring counts open outward, the name never moves
       const aria = t('rd.seg.aria', { domain: DOMAIN[id].label, count: c ? tn('units.entwicklung', c) : t('rd.count.none') });
-      l += `<button type="button" class="seg-label" data-dom="${id}" data-hot-domain="${id}" data-align="${align}" data-side="${side}" aria-pressed="${selected === id}" aria-label="${esc(aria)}" style="${this.pct(x, y)};--ax:${ax.toFixed(3)};--ay:${ay.toFixed(3)};text-align:${align}" title="${esc(t('rd.seg.title', { full: DOMAIN[id].full }))}">${esc(DOMAIN[id].label)}<small aria-hidden="true"></small></button>`;
+      l += `<button type="button" class="seg-label" data-dom="${id}" data-hot-domain="${id}" data-align="${align}" data-side="${side}" aria-haspopup="dialog" aria-pressed="${selected === id}" aria-label="${esc(aria)}" style="${this.pct(x, y)};--ax:${ax.toFixed(3)};--ay:${ay.toFixed(3)};text-align:${align}" title="${esc(t('rd.seg.title', { full: DOMAIN[id].full }))}">${esc(DOMAIN[id].label)}<small aria-hidden="true"></small></button>`;
       const cov = coverage[id];
       const [nx, ny] = P(170, am);
       // Only the unsearched hatch gets a word; an empty searched segment is visibly empty.
@@ -5044,12 +5082,22 @@ class Radar {
     this.svg.addEventListener('click', (ev) => {
       const g = dotOf(ev);
       if (g) { this.hideTip(); this.h.open(g.dataset.id); return; }
+      const group = ev.target.closest('.group-text');
+      if (group) { this.h.browse(group.dataset.browseGroup, group); return; }
       const seg = ev.target.closest('.seg');
-      if (seg) this.h.segment(seg.dataset.dom);
+      if (seg) this.h.browse(seg.dataset.dom, this.labels.querySelector(`.seg-label[data-dom="${CSS.escape(seg.dataset.dom)}"]`));
     });
     this.svg.addEventListener('keydown', (ev) => {
       const g = dotOf(ev);
-      if (!g) return;
+      if (!g) {
+        const group = ev.target.closest('.group-text');
+        const seg = ev.target.closest('.seg');
+        if ((group || seg) && (ev.key === 'Enter' || ev.key === ' ')) {
+          ev.preventDefault();
+          this.h.browse(group ? group.dataset.browseGroup : seg.dataset.dom, group || this.labels.querySelector(`.seg-label[data-dom="${CSS.escape(seg.dataset.dom)}"]`));
+        }
+        return;
+      }
       if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); this.hideTip(); this.h.open(g.dataset.id); return; }
       const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
       if (!step && ev.key !== 'Home' && ev.key !== 'End') return;
@@ -5059,7 +5107,7 @@ class Radar {
       const j = ev.key === 'Home' ? 0 : ev.key === 'End' ? ids.length - 1 : (i + step + ids.length) % ids.length;
       this.dots.get(ids[j])?.focus();
     });
-    this.labels.addEventListener('click', (ev) => { const b = ev.target.closest('.seg-label'); if (b) this.h.segment(b.dataset.dom); });
+    this.labels.addEventListener('click', (ev) => { const b = ev.target.closest('.seg-label'); if (b) this.h.browse(b.dataset.dom, b); });
     this.labels.addEventListener('pointerover', (ev) => { const tick = ev.target.closest('.ring-tick'); if (tick) this.showRingTip(tick); });
     this.labels.addEventListener('pointerout', (ev) => { const tick = ev.target.closest('.ring-tick'); if (tick && !tick.contains(ev.relatedTarget)) this.hideTip(); });
     if ('ResizeObserver' in window) {
@@ -5169,6 +5217,7 @@ const Overview = {
     </div>`);
     this.radar = new Radar($('#radar'), {
       open: (id) => navigate(themaHref(id)),
+      browse: (categoryId, trigger) => document.dispatchEvent(new CustomEvent('radar:browse', { detail: { categoryId, trigger } })),
       segment: (dom) => { store.user.prefs.domain = store.user.prefs.domain === dom ? null : dom; saveUser(); commit(); },
     });
     this.first = true;
@@ -6836,6 +6885,189 @@ document.addEventListener('DOMContentLoaded', boot);
   panel.append(categoryLabel, prompt, status, list);
   dialog.append(panel);
   const de = () => document.documentElement.lang === 'de';
+  const browseDialog = document.getElementById('category-browse');
+  const browseTitle = document.getElementById('category-browse-title');
+  const browseStatus = document.getElementById('category-browse-status');
+  const browseList = document.getElementById('category-source-list');
+  const browseMore = document.getElementById('category-browse-more');
+  const browseRetry = document.getElementById('category-browse-retry');
+  const browseCategories = {
+    'Customer needs': ['Kundenbedarf', 'Customer needs'],
+    'Renovation and market demand': ['Renovierung und Marktnachfrage', 'Renovation and market demand'],
+    Technology: ['Technologie', 'Technology'],
+    'Future regulation/product requirements': ['Regulierung und Produktanforderungen', 'Regulation and product requirements'],
+    'Market structure and trade': ['Marktstruktur und Handel', 'Market structure and trade'],
+    'Labour-related customer needs': ['Arbeitsbezogene Kundenbedürfnisse', 'Labour-related customer needs'],
+    'Research and adjacent industries': ['Forschung und angrenzende Branchen', 'Research and adjacent industries'],
+  };
+  const browseGroups = {
+    technik: ['Technik', 'Technology'],
+    markt: ['Markt', 'Market'],
+    umfeld: ['Umfeld', 'Environment'],
+  };
+  const browseRadarCategories = {
+    T1: 'Technology',
+    T2: 'Technology',
+    T3: 'Technology',
+    M1: 'Renovation and market demand',
+    M2: 'Customer needs',
+    M3: 'Market structure and trade',
+    L: 'Future regulation/product requirements',
+    S: 'Labour-related customer needs',
+    E: 'Market structure and trade',
+    CI: 'Research and adjacent industries',
+  };
+  let browseRequest;
+  let browseGeneration = 0;
+  let browseCategoryId;
+  let browseOffset = null;
+  let browseTrigger;
+  let browseLoading = false;
+  const browseName = (categoryId, categories = []) => {
+    if (browseGroups[categoryId]) return browseGroups[categoryId][de() ? 0 : 1];
+    const category = categories[0];
+    return browseCategories[category]?.[de() ? 0 : 1] || category || categoryId;
+  };
+  const syncBrowseLanguage = () => {
+    const selected = browseCategoryId;
+    if (selected) browseTitle.textContent = browseName(selected, browseCategoriesFor(selected));
+    browseDialog.querySelector('.category-browse-kicker').textContent = de() ? 'Qdrant · Quellen' : 'Qdrant · Sources';
+    const closeLabel = de() ? 'Schließen' : 'Close';
+    document.getElementById('category-browse-close').setAttribute('aria-label', closeLabel);
+    document.getElementById('category-browse-close').title = closeLabel;
+    browseMore.textContent = de() ? 'Mehr laden' : 'Load more';
+    browseRetry.textContent = de() ? 'Erneut versuchen' : 'Retry';
+  };
+  const browseCategoriesFor = (categoryId) => {
+    if (categoryId === 'technik') return ['Technology'];
+    if (categoryId === 'markt') return ['Customer needs', 'Renovation and market demand', 'Market structure and trade'];
+    if (categoryId === 'umfeld') return ['Future regulation/product requirements', 'Labour-related customer needs', 'Research and adjacent industries'];
+    return browseRadarCategories[categoryId] ? [browseRadarCategories[categoryId]] : [];
+  };
+  function resetBrowse() {
+    browseRequest?.abort();
+    browseRequest = null;
+    browseLoading = false;
+    browseOffset = null;
+    browseMore.hidden = true;
+    browseMore.disabled = false;
+    browseRetry.hidden = true;
+    browseRetry.disabled = false;
+    browseStatus.textContent = '';
+    browseList.replaceChildren();
+  }
+  function appendSource(item) {
+    const titleText = item.title || item.publisher;
+    if (!titleText) return;
+    let url;
+    try {
+      const parsed = new URL(item.url);
+      if (['https:', 'http:'].includes(parsed.protocol)) url = parsed.href;
+    } catch {}
+    const row = document.createElement('li');
+    row.className = 'category-source';
+    const title = document.createElement(url ? 'a' : 'strong');
+    title.className = 'category-source-title';
+    title.textContent = titleText;
+    if (url) { title.href = url; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
+    row.append(title);
+    if (item.publisher && item.publisher !== titleText) {
+      const publisher = document.createElement('p');
+      publisher.className = 'category-source-publisher';
+      publisher.textContent = item.publisher;
+      row.append(publisher);
+    }
+    if (item.text) {
+      const excerpt = document.createElement('p');
+      excerpt.className = 'category-source-excerpt';
+      excerpt.textContent = item.text;
+      row.append(excerpt);
+    }
+    browseList.append(row);
+  }
+  async function loadBrowsePage(generation, offset = null) {
+    if (generation !== browseGeneration || browseLoading) return;
+    browseLoading = true;
+    browseMore.hidden = true;
+    browseRetry.hidden = true;
+    browseStatus.textContent = de() ? 'Quellen werden geladen…' : 'Loading sources…';
+    const controller = browseRequest;
+    try {
+      const response = await fetch('/api/qdrant/category-sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoryId: browseCategoryId, offset }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      const result = await response.json();
+      if (generation !== browseGeneration || controller !== browseRequest) return;
+      if (!Array.isArray(result.items) || !Array.isArray(result.categories)
+          || result.items.some((item) => !result.categories.includes(item.category))) {
+        throw new Error('Category mismatch in Qdrant response');
+      }
+      result.items.forEach(appendSource);
+      browseOffset = result.next_offset ?? null;
+      browseStatus.textContent = browseList.children.length
+        ? '' : (de() ? 'Keine Quellen in dieser Kategorie.' : 'No sources in this category.');
+      browseMore.hidden = browseOffset == null;
+    } catch (error) {
+      if (generation !== browseGeneration || controller !== browseRequest || error.name === 'AbortError') return;
+      browseStatus.textContent = de() ? 'Qdrant-Quellen konnten nicht geladen werden. Bitte erneut versuchen.' : 'Could not load Qdrant sources. Please retry.';
+      browseRetry.hidden = false;
+    } finally {
+      if (generation === browseGeneration && controller === browseRequest) {
+        browseLoading = false;
+        browseMore.disabled = false;
+        browseRetry.disabled = false;
+      }
+    }
+  }
+  function openBrowse(categoryId, trigger) {
+    resetBrowse();
+    browseCategoryId = categoryId;
+    browseTrigger = trigger;
+    browseRequest = new AbortController();
+    const generation = ++browseGeneration;
+    syncBrowseLanguage();
+    if (!browseDialog.open) browseDialog.showModal();
+    loadBrowsePage(generation);
+  }
+  document.addEventListener('radar:browse', (event) => {
+    openBrowse(event.detail.categoryId, event.detail.trigger);
+  });
+  document.getElementById('category-browse-close').addEventListener('click', () => browseDialog.close());
+  browseDialog.addEventListener('click', (event) => {
+    if (event.target === browseDialog) browseDialog.close();
+  });
+  browseDialog.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      browseDialog.close();
+    }
+  });
+  browseDialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    browseDialog.close();
+  });
+  browseDialog.addEventListener('close', () => {
+    resetBrowse();
+    browseCategoryId = null;
+    const trigger = browseTrigger;
+    browseTrigger = null;
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+  });
+  browseMore.addEventListener('click', () => {
+    if (browseOffset == null || browseLoading) return;
+    browseMore.disabled = true;
+    loadBrowsePage(browseGeneration, browseOffset);
+  });
+  browseRetry.addEventListener('click', () => {
+    if (browseLoading) return;
+    browseRetry.disabled = true;
+    loadBrowsePage(browseGeneration, browseList.children.length ? browseOffset : null);
+  });
   const categories = [
     ['all', 'Alle sieben Kategorien', 'All seven categories'],
     ['customer-needs', 'Kundenbedarf', 'Customer needs'],
@@ -6861,7 +7093,7 @@ document.addEventListener('DOMContentLoaded', boot);
     promptSummary.textContent = de() ? 'Generierter Qdrant-Prompt' : 'Generated Qdrant query';
   };
   label();
-  new MutationObserver(label).observe(document.documentElement, {attributes:true, attributeFilter:['lang']});
+  new MutationObserver(() => { label(); syncBrowseLanguage(); }).observe(document.documentElement, {attributes:true, attributeFilter:['lang']});
   let request;
   function reset() {
     request?.abort();

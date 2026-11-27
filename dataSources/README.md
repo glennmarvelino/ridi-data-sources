@@ -74,10 +74,17 @@ GET /api/points
 GET /api/points?offset=<URL-encoded JSON next_offset>
 Response: {"items": [Qdrant points including id and payload], "next_offset": ...}
 
+GET /api/category-sources?categories=<URL-encoded JSON string list>&offset=<URL-encoded JSON next_offset>
+Response: {"items": [Qdrant points matching an exact payload category], "next_offset": ...}
+
 POST /api/search
 Content-Type: application/json
 Body: {"q": "smart lighting"}
 Response: {"items": [Qdrant points including score], "next_offset": null}
+
+Category browsing uses exact Qdrant payload matches and carries the same category
+filter to each scroll page. The collection needs a keyword payload index on
+`category`; the service does not modify collection indexes.
 
 Only the backend knows the Qdrant credentials. No write endpoints exist.
 QDRANT_URL and QDRANT_API_KEY may alternatively be provided as environment

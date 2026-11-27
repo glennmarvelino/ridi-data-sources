@@ -2,7 +2,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -45,6 +45,29 @@ SEARCH_GUIDANCE = (
     ' Prioritize direct RIDI application fit, observable change, authoritative accessible and '
     'actionable evidence; prefer higher-ranked category entries; exclude competitor-only monitoring.'
 )
+RADAR_BROWSE_CATEGORIES = {
+    'T1': ('Technology',),
+    'T2': ('Technology',),
+    'T3': ('Technology',),
+    'M1': ('Renovation and market demand',),
+    'M2': ('Customer needs',),
+    'M3': ('Market structure and trade',),
+    'L': ('Future regulation/product requirements',),
+    'S': ('Labour-related customer needs',),
+    'E': ('Market structure and trade',),
+    'CI': ('Research and adjacent industries',),
+    'technik': ('Technology',),
+    'markt': (
+        'Customer needs',
+        'Renovation and market demand',
+        'Market structure and trade',
+    ),
+    'umfeld': (
+        'Future regulation/product requirements',
+        'Labour-related customer needs',
+        'Research and adjacent industries',
+    ),
+}
 
 
 def build_search_prompt(question, category='all'):
@@ -83,6 +106,31 @@ def search(q):
                       'page': p.get('page') or p.get('pdf_page'), 'text': str(p.get('text') or '')[:360]})
     return items
 
+
+def browse_sources(category_id, offset=None):
+    categories = RADAR_BROWSE_CATEGORIES[category_id]
+    params = {'categories': json.dumps(categories)}
+    if offset is not None:
+        params['offset'] = json.dumps(offset)
+    req = Request(
+        DATA_SOURCES_URL + '/api/category-sources?' + urlencode(params),
+        headers={'Accept': 'application/json'},
+    )
+    with build_opener(NoRedirect()).open(req, timeout=25) as response:
+        result = json.load(response)
+    items = []
+    for point in result.get('items', []):
+        payload = point.get('payload') or {}
+        items.append({
+            'title': str(payload.get('title') or payload.get('ranked_entry_title') or ''),
+            'publisher': str(payload.get('source') or payload.get('publisher') or ''),
+            'url': str(payload.get('source_url') or payload.get('url') or ''),
+            'text': str(payload.get('text') or payload.get('content') or payload.get('description') or '')[:360],
+            'category': str(payload.get('category') or ''),
+        })
+    return {'items': items, 'next_offset': result.get('next_offset'), 'categories': categories}
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_data(self, status, mime, data):
         self.send_response(status)
@@ -104,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {'error': 'Not found'})
 
     def do_POST(self):
-        if self.path != '/api/qdrant/search':
+        if self.path not in ('/api/qdrant/search', '/api/qdrant/category-sources'):
             return self.send_json(404, {'error': 'Not found'})
         if self.headers.get('Origin') not in (None, 'http://127.0.0.1:8000', 'http://localhost:8000'):
             return self.send_json(403, {'error': 'Invalid origin'})
@@ -115,15 +163,36 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < n <= 8192:
                 raise ValueError
             body = json.loads(self.rfile.read(n))
-            q = body.get('q')
-            category = body.get('category', 'all')
-            if not isinstance(q, str) or not 1 <= len(q.strip()) <= 500:
-                raise ValueError
-            if not isinstance(category, str):
-                raise ValueError
-            query = build_search_prompt(q.strip(), category)
+            if self.path == '/api/qdrant/category-sources':
+                category_id = body.get('categoryId')
+                offset = body.get('offset')
+                if not isinstance(category_id, str) or category_id not in RADAR_BROWSE_CATEGORIES:
+                    raise ValueError
+                if offset is not None and (type(offset) not in (int, str) or len(str(offset)) > 100 or (type(offset) is int and offset < 0)):
+                    raise ValueError
+                query = None
+            else:
+                q = body.get('q')
+                category = body.get('category', 'all')
+                if not isinstance(q, str) or not 1 <= len(q.strip()) <= 500:
+                    raise ValueError
+                if not isinstance(category, str):
+                    raise ValueError
+                query = build_search_prompt(q.strip(), category)
         except (ValueError, AttributeError):
-            return self.send_json(400, {'error': 'Enter 1–500 characters and choose a valid research category'})
+            message = (
+                'Enter 1–500 characters and choose a valid research category'
+                if self.path == '/api/qdrant/search'
+                else 'Enter a valid radar category and page offset'
+            )
+            return self.send_json(400, {'error': message})
+        if self.path == '/api/qdrant/category-sources':
+            try:
+                result = browse_sources(category_id, offset)
+            except (HTTPError, URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+                self.log_error('Qdrant browse failed: %s %s', type(exc).__name__, getattr(exc, 'code', ''))
+                return self.send_json(502, {'error': 'Qdrant sources unavailable'})
+            return self.send_json(200, result)
         try:
             items = search(query)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:

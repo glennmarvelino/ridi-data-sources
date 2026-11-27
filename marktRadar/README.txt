@@ -9,6 +9,9 @@ The recommended setup is Docker Compose from the repository root:
    search across all categories), and press Enter. Changing the category while a
    topic is present immediately refreshes the Qdrant query and source results;
    no Enter key is needed. Typing alone does not trigger a search.
+5. Click a radar domain or group label to browse its live Qdrant sources. The
+   popup loads the first page immediately and keeps the selected category filter
+   when loading more results.
 
 MarktRadar turns the topic into a short, RIDI-focused Qdrant retrieval query.
 The query scopes results to professional lighting in non-residential buildings
