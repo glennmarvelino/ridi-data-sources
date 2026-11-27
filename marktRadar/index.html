@@ -2821,7 +2821,7 @@ I18N.add('vw', {
   de: {
     title: {
       uebersicht: 'Übersicht', neu: 'Neu', produkte: 'Produkte', tabelle: 'Alle Bewertungen',
-      quellen: 'Quellen', usecases: 'Use Cases (Semester)', einstellungen: 'Einstellungen', daten: 'Daten & Status',
+      quellen: 'Quellen', usecases: 'Forschungsfragen (Semester)', einstellungen: 'Einstellungen', daten: 'Daten & Status',
     },
     hint: {
       uebersicht: 'Was braucht jetzt eine Entscheidung?', neu: 'Aufgaben und was sich bewegt hat',
@@ -2995,7 +2995,7 @@ I18N.add('vw', {
       catalogValue: 'Öffentlicher Hauptkatalog 2025/2026, {n} (kein PIM)',
       gapTitle: 'Katalog-Lücke',
       gapBadge: '{n} fehlen',
-      gapIntro: 'Die Use-Case-Antworten nennen diese Familien. Im Katalog-Auszug mit {n} fehlen sie.',
+      gapIntro: 'Die Antworten auf die Forschungsfragen nennen diese Familien. Im Katalog-Auszug mit {n} fehlen sie.',
       gapNote: 'Produktbezüge zu diesen Familien sind erst belastbar, wenn die Extraktion geprüft ist. Familien je Baustein stehen in BAUSTEINE (core.js).',
       covTitle: 'Abdeckung je Domäne',
       covIntro: 'Unterscheidet „nichts gefunden“ von „nicht gesucht“. Das Radar zeigt nicht durchsuchte Segmente grau.',
@@ -3033,7 +3033,7 @@ I18N.add('vw', {
   en: {
     title: {
       uebersicht: 'Overview', neu: 'New', produkte: 'Products', tabelle: 'All ratings',
-      quellen: 'Sources', usecases: 'Use cases (semester)', einstellungen: 'Settings', daten: 'Data & status',
+      quellen: 'Sources', usecases: 'Research questions (semester)', einstellungen: 'Settings', daten: 'Data & status',
     },
     hint: {
       uebersicht: 'What needs a decision now?', neu: 'Tasks and what has moved',
@@ -3207,7 +3207,7 @@ I18N.add('vw', {
       catalogValue: 'Public main catalogue 2025/2026, {n} (no PIM)',
       gapTitle: 'Catalogue gap',
       gapBadge: '{n} missing',
-      gapIntro: 'The use-case answers name these families. They are missing from the catalogue extract with {n}.',
+      gapIntro: 'The research question answers name these families. They are missing from the catalogue extract with {n}.',
       gapNote: 'Product links to these families only become reliable once the extraction is checked. Families per building block are listed in BAUSTEINE (core.js).',
       covTitle: 'Coverage per domain',
       covIntro: 'Tells “nothing found” apart from “not searched”. The radar shows segments that were not searched in grey.',
@@ -6882,7 +6882,12 @@ document.addEventListener('DOMContentLoaded', boot);
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   const list = document.createElement('ul');
-  panel.append(categoryLabel, prompt, status, list);
+  const searchMore = document.createElement('button');
+  searchMore.id = 'search-more';
+  searchMore.className = 'btn btn--sm';
+  searchMore.type = 'button';
+  searchMore.hidden = true;
+  panel.append(categoryLabel, prompt, status, list, searchMore);
   dialog.append(panel);
   const de = () => document.documentElement.lang === 'de';
   const browseDialog = document.getElementById('category-browse');
@@ -6905,18 +6910,6 @@ document.addEventListener('DOMContentLoaded', boot);
     markt: ['Markt', 'Market'],
     umfeld: ['Umfeld', 'Environment'],
   };
-  const browseRadarCategories = {
-    T1: 'Technology',
-    T2: 'Technology',
-    T3: 'Technology',
-    M1: 'Renovation and market demand',
-    M2: 'Customer needs',
-    M3: 'Market structure and trade',
-    L: 'Future regulation/product requirements',
-    S: 'Labour-related customer needs',
-    E: 'Market structure and trade',
-    CI: 'Research and adjacent industries',
-  };
   let browseRequest;
   let browseGeneration = 0;
   let browseCategoryId;
@@ -6924,6 +6917,7 @@ document.addEventListener('DOMContentLoaded', boot);
   let browseTrigger;
   let browseLoading = false;
   const browseName = (categoryId, categories = []) => {
+    if (DOMAIN[categoryId]) return DOMAIN[categoryId].label;
     if (browseGroups[categoryId]) return browseGroups[categoryId][de() ? 0 : 1];
     const category = categories[0];
     return browseCategories[category]?.[de() ? 0 : 1] || category || categoryId;
@@ -6935,14 +6929,15 @@ document.addEventListener('DOMContentLoaded', boot);
     const closeLabel = de() ? 'Schließen' : 'Close';
     document.getElementById('category-browse-close').setAttribute('aria-label', closeLabel);
     document.getElementById('category-browse-close').title = closeLabel;
-    browseMore.textContent = de() ? 'Mehr laden' : 'Load more';
+    browseMore.textContent = de() ? 'Weitere Quellen laden' : 'Load more sources';
     browseRetry.textContent = de() ? 'Erneut versuchen' : 'Retry';
+    searchMore.textContent = de() ? 'Weitere Quellen laden' : 'Load more sources';
   };
   const browseCategoriesFor = (categoryId) => {
     if (categoryId === 'technik') return ['Technology'];
     if (categoryId === 'markt') return ['Customer needs', 'Renovation and market demand', 'Market structure and trade'];
     if (categoryId === 'umfeld') return ['Future regulation/product requirements', 'Labour-related customer needs', 'Research and adjacent industries'];
-    return browseRadarCategories[categoryId] ? [browseRadarCategories[categoryId]] : [];
+    return [];
   };
   function resetBrowse() {
     browseRequest?.abort();
@@ -6956,8 +6951,9 @@ document.addEventListener('DOMContentLoaded', boot);
     browseStatus.textContent = '';
     browseList.replaceChildren();
   }
-  function appendSource(item) {
-    const titleText = item.title || item.publisher;
+  function appendSource(item, target = browseList) {
+    const publisher = item.publisher || item.source || '';
+    const titleText = item.title || publisher;
     if (!titleText) return;
     let url;
     try {
@@ -6971,11 +6967,11 @@ document.addEventListener('DOMContentLoaded', boot);
     title.textContent = titleText;
     if (url) { title.href = url; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
     row.append(title);
-    if (item.publisher && item.publisher !== titleText) {
-      const publisher = document.createElement('p');
-      publisher.className = 'category-source-publisher';
-      publisher.textContent = item.publisher;
-      row.append(publisher);
+    if (publisher && publisher !== titleText) {
+      const publisherLine = document.createElement('p');
+      publisherLine.className = 'category-source-publisher';
+      publisherLine.textContent = publisher;
+      row.append(publisherLine);
     }
     if (item.text) {
       const excerpt = document.createElement('p');
@@ -6983,7 +6979,17 @@ document.addEventListener('DOMContentLoaded', boot);
       excerpt.textContent = item.text;
       row.append(excerpt);
     }
-    browseList.append(row);
+    target.append(row);
+  }
+  async function searchDomain(domainId, text, signal, offset = 0) {
+    const response = await fetch('/api/qdrant/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domainId, q: text, offset }),
+      signal,
+    });
+    if (!response.ok) throw new Error(String(response.status));
+    return response.json();
   }
   async function loadBrowsePage(generation, offset = null) {
     if (generation !== browseGeneration || browseLoading) return;
@@ -6993,23 +6999,41 @@ document.addEventListener('DOMContentLoaded', boot);
     browseStatus.textContent = de() ? 'Quellen werden geladen…' : 'Loading sources…';
     const controller = browseRequest;
     try {
-      const response = await fetch('/api/qdrant/category-sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryId: browseCategoryId, offset }),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(String(response.status));
-      const result = await response.json();
+      let result;
+      if (DOMAIN[browseCategoryId]) {
+        result = await searchDomain(browseCategoryId, '', controller.signal, offset == null ? 0 : offset);
+      } else {
+        const response = await fetch('/api/qdrant/category-sources', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categoryId: browseCategoryId, offset }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        result = await response.json();
+      }
       if (generation !== browseGeneration || controller !== browseRequest) return;
-      if (!Array.isArray(result.items) || !Array.isArray(result.categories)
-          || result.items.some((item) => !result.categories.includes(item.category))) {
+      if (!Array.isArray(result.items) || (!DOMAIN[browseCategoryId]
+          && (!Array.isArray(result.categories)
+            || result.items.some((item) => !result.categories.includes(item.category))))) {
         throw new Error('Category mismatch in Qdrant response');
       }
-      result.items.forEach(appendSource);
+      result.items.forEach((item) => appendSource(item));
       browseOffset = result.next_offset ?? null;
-      browseStatus.textContent = browseList.children.length
-        ? '' : (de() ? 'Keine Quellen in dieser Kategorie.' : 'No sources in this category.');
+      if (DOMAIN[browseCategoryId]) {
+        if (!Number.isInteger(result.total) || !Number.isInteger(result.review_pending_count)
+            || result.domain_id !== browseCategoryId) throw new Error('Invalid domain-source response');
+        browseStatus.textContent = result.total
+          ? (de()
+            ? `${result.total} bestätigte Quellen · ${browseList.children.length} angezeigt · ${result.review_pending_count} Katalogeinträge noch in Prüfung`
+            : `${result.total} confirmed sources · ${browseList.children.length} shown · ${result.review_pending_count} catalogue records pending review`)
+          : (de()
+            ? `Für diese Kategorie sind derzeit keine Quellen verfügbar. ${result.review_pending_count} Katalogeinträge sind noch in Prüfung.`
+            : `No sources are currently available for this category. ${result.review_pending_count} catalogue records are still under review.`);
+      } else {
+        browseStatus.textContent = browseList.children.length
+          ? '' : (de() ? 'Keine passenden Quellen gefunden.' : 'No relevant sources found.');
+      }
       browseMore.hidden = browseOffset == null;
     } catch (error) {
       if (generation !== browseGeneration || controller !== browseRequest || error.name === 'AbortError') return;
@@ -7068,24 +7092,17 @@ document.addEventListener('DOMContentLoaded', boot);
     browseRetry.disabled = true;
     loadBrowsePage(browseGeneration, browseList.children.length ? browseOffset : null);
   });
-  const categories = [
-    ['all', 'Alle sieben Kategorien', 'All seven categories'],
-    ['customer-needs', 'Kundenbedarf', 'Customer needs'],
-    ['renovation-demand', 'Renovierung und Marktnachfrage', 'Renovation and market demand'],
-    ['technology', 'Technologie', 'Technology'],
-    ['regulation', 'Regulierung und Produktanforderungen', 'Regulation and product requirements'],
-    ['labour', 'Arbeitsbezogene Kundenbedürfnisse', 'Labour-related customer needs'],
-    ['research-adjacent', 'Forschung und angrenzende Branchen', 'Research and adjacent industries'],
-    ['market-trade', 'Marktstruktur und Handel', 'Market structure and trade'],
-  ];
   const label = () => {
-    const selected = category.value || 'all';
+    const selected = category.value;
     input.title = de() ? 'Enter: Qdrant durchsuchen' : 'Enter: Search Qdrant';
-    categoryName.textContent = de() ? 'Marktforschungs-Kategorie' : 'Market research category';
-    category.replaceChildren(...categories.map(([value, german, english]) => {
+    categoryName.textContent = de() ? 'Kategorie' : 'Category';
+    const chooseDomain = document.createElement('option');
+    chooseDomain.value = '';
+    chooseDomain.textContent = de() ? 'Kategorie wählen…' : 'Select a category…';
+    category.replaceChildren(chooseDomain, ...DOMAINS.map((domain) => {
       const option = document.createElement('option');
-      option.value = value;
-      option.textContent = de() ? german : english;
+      option.value = domain.id;
+      option.textContent = domain.label;
       return option;
     }));
     category.value = selected;
@@ -7095,9 +7112,14 @@ document.addEventListener('DOMContentLoaded', boot);
   label();
   new MutationObserver(() => { label(); syncBrowseLanguage(); }).observe(document.documentElement, {attributes:true, attributeFilter:['lang']});
   let request;
+  let searchOffset = null;
+  let searchLoading = false;
   function reset() {
     request?.abort();
     request = null;
+    searchOffset = null;
+    searchLoading = false;
+    searchMore.hidden = true;
     status.textContent = '';
     prompt.hidden = true;
     promptText.textContent = '';
@@ -7105,52 +7127,56 @@ document.addEventListener('DOMContentLoaded', boot);
   }
   input.addEventListener('input', reset);
   category.addEventListener('change', () => {
-    if (input.value.trim()) runSearch();
-    else reset();
+    runSearch();
   });
   dialog.addEventListener('close', reset);
-  async function runSearch(showEmptyMessage = false) {
-    reset();
-    const q = input.value.trim();
-    if (!q) {
-      if (showEmptyMessage) status.textContent = de() ? 'Bitte Suchbegriff eingeben.' : 'Enter a search term.';
+  async function runSearch(offset = 0, append = false) {
+    if (searchLoading) return;
+    if (!append) reset();
+    if (!category.value) {
+      status.textContent = de() ? 'Bitte eine Kategorie wählen.' : 'Please select a category.';
       return;
     }
+    const q = input.value.trim();
     const active = request = new AbortController();
+    searchLoading = true;
+    searchMore.hidden = true;
     status.textContent = de() ? 'Suche läuft…' : 'Searching…';
     try {
-      const response = await fetch('/api/qdrant/search', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({q, category:category.value}), signal:active.signal
-      });
-      if (!response.ok) throw new Error(String(response.status));
-      const {items, query} = await response.json();
+      const result = await searchDomain(category.value, q, active.signal, offset);
       if (request !== active) return;
-      status.textContent = items.length ? (de() ? 'Qdrant · Quellen' : 'Qdrant · Sources') : (de() ? 'Keine Ergebnisse.' : 'No results.');
-      promptText.textContent = query;
-      prompt.hidden = !query;
-      for (const item of items) {
-        const li = document.createElement('li');
-        let url;
-        try { const u = new URL(item.url); if (['https:', 'http:'].includes(u.protocol)) url = u.href; } catch {}
-        const title = document.createElement(url ? 'a' : 'strong');
-        title.textContent = item.title || item.source || 'Source';
-        if (url) { title.href = url; title.target = '_blank'; title.rel = 'noopener noreferrer'; }
-        const detail = document.createElement('p');
-        detail.textContent = [item.source, item.page ? 'p. ' + item.page : '', item.text].filter(Boolean).join(' · ');
-        li.append(title, detail);
-        list.append(li);
+      if (result.domain_id !== category.value || !Array.isArray(result.items)
+          || !Number.isInteger(result.total) || !Number.isInteger(result.review_pending_count)) {
+        throw new Error('Invalid domain-source response');
       }
+      result.items.forEach((item) => appendSource(item, list));
+      searchOffset = result.next_offset ?? null;
+      const shown = list.children.length;
+      status.textContent = result.total
+        ? (de()
+          ? `${result.total} bestätigte Quellen · ${shown} angezeigt · ${result.review_pending_count} Katalogeinträge noch in Prüfung`
+          : `${result.total} confirmed sources · ${shown} shown · ${result.review_pending_count} catalogue records pending review`)
+        : (q ? (de() ? 'Keine passenden Quellen in dieser Kategorie.' : 'No matching sources in this category.')
+          : (de()
+          ? `Für diese Kategorie sind derzeit keine Quellen verfügbar. ${result.review_pending_count} Katalogeinträge sind noch in Prüfung.`
+          : `No sources are currently available for this category. ${result.review_pending_count} catalogue records are still under review.`));
+      prompt.hidden = true;
+      searchMore.hidden = searchOffset == null;
     } catch (e) {
       if (request === active) status.textContent = de() ? 'Qdrant nicht erreichbar. Serverkonfiguration prüfen.' : 'Qdrant search unavailable. Check the server configuration.';
+    } finally {
+      if (request === active) searchLoading = false;
     }
   }
+  searchMore.addEventListener('click', () => {
+    if (searchOffset != null && !searchLoading) runSearch(searchOffset, true);
+  });
   input.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.isComposing) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.repeat) return;
-    runSearch(true);
+    runSearch();
   });
 })();
 </script>

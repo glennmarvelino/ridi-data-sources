@@ -82,10 +82,18 @@ Content-Type: application/json
 Body: {"q": "smart lighting"}
 Response: {"items": [Qdrant points including score], "next_offset": null}
 
-Category browsing uses exact Qdrant payload matches and carries the same category
-filter to each scroll page. The collection needs a keyword payload index on
-`category`; the service does not modify collection indexes.
+POST /api/points/retrieve
+Content-Type: application/json
+Body: {"ids": [1, 2]}
+Response: {"items": [Qdrant points for the requested IDs]}
 
+Category browsing scrolls the collection read-only with only the `category`
+payload field, applies exact category matching in the service, then retrieves
+the full payload for the requested page. Its `next_offset` is an integer index
+into the ordered matching records. This avoids requiring a Qdrant payload index
+on `category` and does not modify collection indexes or records.
+
+Point retrieval is read-only and accepts up to 100 unique non-negative point IDs.
 Only the backend knows the Qdrant credentials. No write endpoints exist.
 QDRANT_URL and QDRANT_API_KEY may alternatively be provided as environment
 variables. `.env.example` is a template; this server automatically loads
@@ -98,7 +106,7 @@ remote clients is implemented. Justin can handle Docker and later connect
 Marktradar to this service. No Marktradar files are overwritten.
 When containerizing, configure binding, network access and trusted origins.
 
-Automated tests use a local mock HTTP upstream: they check real REST request
+Automated tests use a local mock HTTP upstream: they check REST request
 paths/bodies, paging, read-only behavior, validation, and upstream failures.
-Live Qdrant and browser UI still need testing with your current key.
-Try browse, next, previous, search "smart lighting", payload details and links.
+Live Qdrant category browsing and the MarktRadar Regulierung popup were verified;
+the popup loaded EU Ecodesign point 10 through the Data Sources retrieve route.

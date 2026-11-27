@@ -53,6 +53,8 @@ class Handler(BaseHTTPRequestHandler):
                         or any(not isinstance(category, str) or category not in QDRANT_CATEGORIES for category in categories)
                         or len(set(categories)) != len(categories)):
                     raise ValueError
+                if offset is not None and type(offset) is not int:
+                    raise ValueError
         except ValueError:
             return self.reply(400, {'error': 'Invalid category or page offset'})
         try:
@@ -61,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(502, {'error': str(e)})
 
     def do_POST(self):
-        if self.path != '/api/search':
+        if self.path not in ('/api/search', '/api/points/retrieve'):
             return self.reply(404, {'error': 'Not found'})
         if self.headers.get('Origin') not in (None, 'http://localhost:8001', 'http://127.0.0.1:8001'):
             return self.reply(403, {'error': 'Invalid origin'})
@@ -71,13 +73,26 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             if not 0 < length <= 8192:
                 raise ValueError
-            q = json.loads(self.rfile.read(length)).get('q')
-            if not isinstance(q, str) or not 1 <= len(q.strip()) <= 500:
-                raise ValueError
+            body = json.loads(self.rfile.read(length))
+            if self.path == '/api/points/retrieve':
+                ids = body.get('ids')
+                if (not isinstance(ids, list) or not 1 <= len(ids) <= 100
+                        or any(type(point_id) is not int or point_id < 0 for point_id in ids)
+                        or len(set(ids)) != len(ids)):
+                    raise ValueError
+            else:
+                q = body.get('q')
+                if not isinstance(q, str) or not 1 <= len(q.strip()) <= 500:
+                    raise ValueError
         except (ValueError, AttributeError):
-            return self.reply(400, {'error': 'Enter a query of 1–500 characters'})
+            message = 'Enter 1–100 unique non-negative point IDs' if self.path == '/api/points/retrieve' else 'Enter a query of 1–500 characters'
+            return self.reply(400, {'error': message})
         try:
-            self.reply(200, self.gateway.search(q.strip()))
+            if self.path == '/api/points/retrieve':
+                result = self.gateway.retrieve(ids)
+            else:
+                result = self.gateway.search(q.strip())
+            self.reply(200, result)
         except GatewayError as e:
             self.reply(502, {'error': str(e)})
 

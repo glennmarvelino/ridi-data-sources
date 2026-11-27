@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY server.py index.html ./
+COPY server.py index.html source_assignments.json ./
 
 EXPOSE 8000
 ENV HOST=0.0.0.0 PORT=8000 DATA_SOURCES_URL=http://datasources:8001

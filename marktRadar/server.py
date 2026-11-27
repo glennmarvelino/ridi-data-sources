@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -45,17 +46,16 @@ SEARCH_GUIDANCE = (
     ' Prioritize direct RIDI application fit, observable change, authoritative accessible and '
     'actionable evidence; prefer higher-ranked category entries; exclude competitor-only monitoring.'
 )
+SOURCE_ASSIGNMENT_DATA = json.loads(
+    Path(__file__).with_name('source_assignments.json').read_text(encoding='utf-8')
+)
+DOMAIN_SOURCE_ASSIGNMENTS = SOURCE_ASSIGNMENT_DATA['domains']
+SOURCE_REVIEW_PENDING_COUNT = sum(
+    status in ('unchecked', 'needs_team_decision')
+    for status in SOURCE_ASSIGNMENT_DATA['review_status_by_id'].values()
+)
+DOMAIN_SOURCE_PAGE_SIZE = 10
 RADAR_BROWSE_CATEGORIES = {
-    'T1': ('Technology',),
-    'T2': ('Technology',),
-    'T3': ('Technology',),
-    'M1': ('Renovation and market demand',),
-    'M2': ('Customer needs',),
-    'M3': ('Market structure and trade',),
-    'L': ('Future regulation/product requirements',),
-    'S': ('Labour-related customer needs',),
-    'E': ('Market structure and trade',),
-    'CI': ('Research and adjacent industries',),
     'technik': ('Technology',),
     'markt': (
         'Customer needs',
@@ -101,9 +101,11 @@ def search(q):
     items = []
     for point in points:
         p = point.get('payload') or {}
-        items.append({'title': str(p.get('title') or ''), 'source': str(p.get('source') or ''),
+        items.append({'title': str(p.get('title') or p.get('ranked_entry_title') or ''),
+                      'source': str(p.get('source') or p.get('publisher') or ''),
                       'url': str(p.get('source_url') or p.get('url') or ''),
-                      'page': p.get('page') or p.get('pdf_page'), 'text': str(p.get('text') or '')[:360]})
+                      'page': p.get('page') or p.get('pdf_page'),
+                      'text': str(p.get('text') or p.get('content') or p.get('description') or '')[:360]})
     return items
 
 
@@ -129,6 +131,86 @@ def browse_sources(category_id, offset=None):
             'category': str(payload.get('category') or ''),
         })
     return {'items': items, 'next_offset': result.get('next_offset'), 'categories': categories}
+
+
+def retrieve_sources(source_ids):
+    req = Request(
+        DATA_SOURCES_URL + '/api/points/retrieve',
+        data=json.dumps({'ids': source_ids}).encode(),
+        headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+    )
+    with build_opener(NoRedirect()).open(req, timeout=25) as response:
+        return json.load(response).get('items', [])
+
+
+def browse_domain_sources(domain_id, offset=0, query=''):
+    """Return only confirmed source IDs, preserving the reviewed mapping order."""
+    if domain_id not in DOMAIN_SOURCE_ASSIGNMENTS:
+        raise ValueError('Unknown category.')
+    if type(offset) is not int or offset < 0:
+        raise ValueError('Invalid page offset.')
+    source_ids = [entry['id'] for entry in DOMAIN_SOURCE_ASSIGNMENTS[domain_id]]
+    query = ' '.join(query.split())
+    if query:
+        points = []
+        for start in range(0, len(source_ids), 100):
+            points.extend(retrieve_sources(source_ids[start:start + 100]))
+        by_id = {point.get('id'): point for point in points}
+        if set(by_id) != set(source_ids):
+            raise ValueError('Qdrant returned a different source ID set.')
+        tokens = re.findall(r'[^\W_]+', query.casefold(), flags=re.UNICODE)
+        matches = []
+        for index, source_id in enumerate(source_ids):
+            point = by_id[source_id]
+            payload = point.get('payload') or {}
+            text = ' '.join(str(payload.get(key) or '') for key in (
+                'title', 'ranked_entry_title', 'source', 'text', 'description',
+            )).casefold()
+            score = sum(text.count(token) for token in tokens)
+            if tokens and all(token in text for token in tokens):
+                matches.append((score, index, point))
+        matches.sort(key=lambda hit: (-hit[0], hit[1]))
+        ordered_points = [point for _, _, point in matches]
+    else:
+        page_ids = source_ids[offset:offset + DOMAIN_SOURCE_PAGE_SIZE]
+        if not page_ids:
+            ordered_points = []
+        else:
+            points = retrieve_sources(page_ids)
+            by_id = {point.get('id'): point for point in points}
+            if set(by_id) != set(page_ids):
+                raise ValueError('Qdrant returned a different source ID set.')
+            ordered_points = [by_id[source_id] for source_id in page_ids]
+
+    total = len(ordered_points) if query else len(source_ids)
+    page = (
+        ordered_points[offset:offset + DOMAIN_SOURCE_PAGE_SIZE]
+        if query else ordered_points
+    )
+    items = []
+    reasons = {entry['id']: entry['reason'] for entry in DOMAIN_SOURCE_ASSIGNMENTS[domain_id]}
+    for point in page:
+        payload = point.get('payload') or {}
+        source_id = point['id']
+        items.append({
+            'id': source_id,
+            'title': str(payload.get('title') or payload.get('ranked_entry_title') or ''),
+            'publisher': str(payload.get('source') or payload.get('publisher') or ''),
+            'url': str(payload.get('source_url') or payload.get('url') or ''),
+            'text': str(payload.get('text') or payload.get('content') or payload.get('description') or '')[:360],
+            'assignment_reason': reasons[source_id],
+        })
+    next_offset = offset + len(page)
+    if next_offset >= total:
+        next_offset = None
+    return {
+        'items': items,
+        'next_offset': next_offset,
+        'total': total,
+        'domain_id': domain_id,
+        'query': query,
+        'review_pending_count': SOURCE_REVIEW_PENDING_COUNT,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -173,15 +255,24 @@ class Handler(BaseHTTPRequestHandler):
                 query = None
             else:
                 q = body.get('q')
-                category = body.get('category', 'all')
-                if not isinstance(q, str) or not 1 <= len(q.strip()) <= 500:
+                if not isinstance(q, str) or len(q.strip()) > 500:
                     raise ValueError
-                if not isinstance(category, str):
-                    raise ValueError
-                query = build_search_prompt(q.strip(), category)
+                domain_id = body.get('domainId')
+                if domain_id is not None:
+                    if not isinstance(domain_id, str) or domain_id not in DOMAIN_SOURCE_ASSIGNMENTS:
+                        raise ValueError
+                    offset = body.get('offset', 0)
+                    if type(offset) is not int or offset < 0:
+                        raise ValueError
+                    query = None
+                else:
+                    category = body.get('category', 'all')
+                    if not q.strip() or not isinstance(category, str):
+                        raise ValueError
+                    query = build_search_prompt(q.strip(), category)
         except (ValueError, AttributeError):
             message = (
-                'Enter 1–500 characters and choose a valid research category'
+                'Choose a valid category and enter no more than 500 characters'
                 if self.path == '/api/qdrant/search'
                 else 'Enter a valid radar category and page offset'
             )
@@ -191,6 +282,13 @@ class Handler(BaseHTTPRequestHandler):
                 result = browse_sources(category_id, offset)
             except (HTTPError, URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
                 self.log_error('Qdrant browse failed: %s %s', type(exc).__name__, getattr(exc, 'code', ''))
+                return self.send_json(502, {'error': 'Qdrant sources unavailable'})
+            return self.send_json(200, result)
+        if domain_id is not None:
+            try:
+                result = browse_domain_sources(domain_id, offset, q.strip())
+            except (HTTPError, URLError, TimeoutError, OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+                self.log_error('Qdrant domain browse failed: %s %s', type(exc).__name__, getattr(exc, 'code', ''))
                 return self.send_json(502, {'error': 'Qdrant sources unavailable'})
             return self.send_json(200, result)
         try:
